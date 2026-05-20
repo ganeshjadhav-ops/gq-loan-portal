@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>GrayQuest – Loan Calculator Portal</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #f0f2f5; min-height: 100vh; }
+
+    .header {
+      background: #0f172a; color: white; padding: 18px 40px;
+      display: flex; align-items: center; gap: 16px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+    }
+    .logo { font-size: 26px; font-weight: 800; letter-spacing: -1px; }
+    .logo span { color: #f59e0b; }
+    .tagline { font-size: 13px; color: #94a3b8; margin-left: auto; }
+
+    .main { max-width: 660px; margin: 48px auto; padding: 0 20px 60px; }
+    .card {
+      background: white; border-radius: 20px; padding: 40px;
+      box-shadow: 0 4px 32px rgba(0,0,0,0.09);
+    }
+    .card-title { font-size: 22px; font-weight: 700; color: #0f172a; margin-bottom: 6px; }
+    .card-desc  { font-size: 14px; color: #64748b; margin-bottom: 32px; line-height: 1.6; }
+
+    .steps { display: flex; align-items: center; margin-bottom: 32px; }
+    .step  { text-align: center; }
+    .step-num {
+      width: 34px; height: 34px; border-radius: 50%;
+      background: #e2e8f0; color: #94a3b8;
+      font-weight: 700; font-size: 14px;
+      display: flex; align-items: center; justify-content: center;
+      margin: 0 auto 6px; transition: all .3s;
+    }
+    .step-label { font-size: 11px; color: #94a3b8; white-space: nowrap; }
+    .step.active .step-num   { background: #0f172a; color: #fff; }
+    .step.active .step-label { color: #0f172a; font-weight: 600; }
+    .step.done   .step-num   { background: #10b981; color: #fff; }
+    .step.done   .step-label { color: #065f46; }
+    .step-line   { flex: 1; height: 2px; background: #e2e8f0; margin: 0 8px 18px; }
+
+    .info-box {
+      background: #f0f9ff; border: 1px solid #bae6fd;
+      border-radius: 12px; padding: 16px 20px; margin-bottom: 24px;
+    }
+    .info-box h4 { font-size: 12px; font-weight: 700; color: #0369a1; margin-bottom: 10px; text-transform: uppercase; letter-spacing: .5px; }
+    .info-table { width: 100%; font-size: 13px; border-collapse: collapse; }
+    .info-table td { padding: 4px 0; color: #0c4a6e; }
+    .info-table td:first-child { font-weight: 600; width: 28%; }
+    .badge { display: inline-block; background: #0369a1; color: white; border-radius: 4px; padding: 1px 8px; font-size: 11px; font-weight: 700; margin-right: 6px; }
+
+    .upload-zone {
+      border: 2px dashed #cbd5e1; border-radius: 14px;
+      padding: 44px 24px; text-align: center; cursor: pointer;
+      transition: all .25s; background: #f8fafc; position: relative;
+    }
+    .upload-zone:hover, .upload-zone.dragover { border-color: #f59e0b; background: #fffbeb; }
+    .upload-zone.file-ok { border-color: #10b981; background: #f0fdf4; }
+    .upload-zone input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+    .upload-icon  { font-size: 44px; margin-bottom: 12px; }
+    .upload-title { font-size: 16px; font-weight: 600; color: #1e293b; margin-bottom: 6px; }
+    .upload-sub   { font-size: 13px; color: #94a3b8; }
+    .format-pill  { display: inline-block; margin-top: 14px; background: #f1f5f9; color: #475569; font-size: 11px; padding: 4px 14px; border-radius: 20px; }
+
+    .btn-primary {
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      width: 100%; padding: 14px; background: #0f172a; color: white;
+      border: none; border-radius: 12px; font-size: 15px; font-weight: 700;
+      cursor: pointer; transition: all .2s; margin-top: 22px;
+    }
+    .btn-primary:hover:not(:disabled) { background: #1e293b; transform: translateY(-1px); }
+    .btn-primary:disabled { background: #cbd5e1; cursor: not-allowed; }
+
+    .alert { display: none; padding: 14px 18px; border-radius: 10px; font-size: 14px; margin-top: 18px; gap: 10px; align-items: flex-start; }
+    .alert.show { display: flex; }
+    .alert-error   { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+    .alert-success { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
+
+    .loading { display: none; text-align: center; padding: 32px 0; }
+    .loading.show { display: block; }
+    .spinner { width: 52px; height: 52px; border: 5px solid #e2e8f0; border-top-color: #f59e0b; border-radius: 50%; animation: spin .9s linear infinite; margin: 0 auto 18px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-title { font-size: 16px; font-weight: 600; color: #1e293b; margin-bottom: 4px; }
+    .loading-sub   { font-size: 13px; color: #64748b; }
+
+    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 200; align-items: center; justify-content: center; }
+    .modal-overlay.show { display: flex; }
+    .modal { background: white; border-radius: 22px; padding: 44px 40px; max-width: 460px; width: 90%; text-align: center; box-shadow: 0 24px 64px rgba(0,0,0,.22); animation: popIn .25s ease; }
+    @keyframes popIn { from { transform: scale(.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    .modal h3 { font-size: 21px; color: #0f172a; margin-bottom: 8px; }
+    .modal p  { font-size: 14px; color: #64748b; margin-bottom: 36px; line-height: 1.6; }
+    .modal-btns { display: flex; gap: 16px; }
+    .type-btn { flex: 1; padding: 28px 16px; border-radius: 16px; border: 2px solid; cursor: pointer; font-weight: 800; font-size: 17px; transition: all .2s; background: white; }
+    .type-btn .icon { font-size: 36px; display: block; margin-bottom: 10px; }
+    .type-btn .sub  { font-size: 11px; font-weight: 400; margin-top: 4px; opacity: .7; }
+    .type-btn.dropout    { border-color: #f59e0b; color: #92400e; }
+    .type-btn.dropout:hover    { background: #f59e0b; color: #78350f; transform: translateY(-2px); }
+    .type-btn.foreclosure { border-color: #6366f1; color: #3730a3; }
+    .type-btn.foreclosure:hover { background: #6366f1; color: white; transform: translateY(-2px); }
+    .modal-close { margin-top: 20px; font-size: 13px; color: #94a3b8; cursor: pointer; background: none; border: none; }
+    .modal-close:hover { color: #475569; }
+
+    .tpl-status { font-size: 12px; color: #94a3b8; text-align: center; margin-top: 10px; }
+    .tpl-status.ok  { color: #10b981; }
+    .tpl-status.err { color: #ef4444; }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">Gray<span>Quest</span></div>
+  <div class="tagline">Loan Calculator Portal</div>
+</div>
+
+<div class="main">
+  <div class="card">
+    <div class="card-title">📊 Generate Loan Calculation</div>
+    <div class="card-desc">Upload your App ID file — data is auto-fetched from DISB Dump &amp; DATA sheets and a complete Excel is generated exactly like your template.</div>
+
+    <div class="steps">
+      <div class="step active" id="step1"><div class="step-num">1</div><div class="step-label">Upload File</div></div>
+      <div class="step-line"></div>
+      <div class="step" id="step2"><div class="step-num">2</div><div class="step-label">Select Type</div></div>
+      <div class="step-line"></div>
+      <div class="step" id="step3"><div class="step-num">3</div><div class="step-label">Download Excel</div></div>
+    </div>
+
+    <div class="info-box">
+      <h4>📋 Upload File Format (Excel or CSV — no header row needed)</h4>
+      <table class="info-table">
+        <tr><td><span class="badge">Col A</span></td><td>App ID &nbsp;(e.g. 1190050)</td></tr>
+        <tr><td><span class="badge">Col B</span></td><td>Date of Closing &nbsp;(e.g. 13-Mar-26)</td></tr>
+      </table>
+    </div>
+
+    <div class="upload-zone" id="uploadZone">
+      <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" />
+      <div class="upload-icon" id="uploadIcon">📁</div>
+      <div class="upload-title" id="uploadTitle">Click here or drag &amp; drop your file</div>
+      <div class="upload-sub">Excel (.xlsx / .xls) or CSV accepted</div>
+      <span class="format-pill">Col A: App ID &nbsp;|&nbsp; Col B: Date of Closing</span>
+    </div>
+
+    <div class="tpl-status" id="tplStatus">⏳ Loading template...</div>
+
+    <button class="btn-primary" id="proceedBtn" disabled onclick="showModal()">
+      ▶&nbsp; Proceed to Generate
+    </button>
+
+    <div class="alert alert-error" id="errorAlert"><span>❌</span><span id="errorMsg"></span></div>
+    <div class="alert alert-success" id="successAlert"><span>✅</span><span>Excel generated! Download has started automatically.</span></div>
+
+    <div class="loading" id="loadingDiv">
+      <div class="spinner"></div>
+      <div class="loading-title" id="loadingTitle">Fetching data...</div>
+      <div class="loading-sub">Please wait — generating your Excel file</div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="typeModal">
+  <div class="modal">
+    <h3>🎯 Select Calculation Type</h3>
+    <p>Choose the type of loan calculation.<br/>Each type uses its own formula sheet from the template.</p>
+    <div class="modal-btns">
+      <button class="type-btn dropout" onclick="generate('Dropout')">
+        <span class="icon">🎓</span>Dropout<div class="sub">Student dropout</div>
+      </button>
+      <button class="type-btn foreclosure" onclick="generate('Foreclosure')">
+        <span class="icon">🏦</span>Foreclosure<div class="sub">Loan foreclosure</div>
+      </button>
+    </div>
+    <button class="modal-close" onclick="closeModal()">✕ Cancel</button>
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════
+//  CONFIG
+// ══════════════════════════════════════════════════
+const DISB_URL = 'https://docs.google.com/spreadsheets/d/1FvGTH4IOzoDr6PNBKLfWVENBhevuQDrt2uy8yOwNsZ8/export?format=csv&gid=0';
+const DATA_URL = 'https://docs.google.com/spreadsheets/d/1A6G7GZCKHnmxP9mLcDXmHfFhTSXwA-1AqfphBkCzTYA/export?format=csv&gid=491266174';
+const TEMPLATE_URL = './template/DEMO.xlsx';
+
+// Excel column numbers (1-based)
+const COL_B  = 2;
+const COL_JQ = 277;
+const COL_JR = 278;
+const COL_JW = 283;
+const COL_JX = 284;
+
+// ══════════════════════════════════════════════════
+//  STATE
+// ══════════════════════════════════════════════════
+let templateBuffer = null;
+let selectedFile   = null;
+
+// ══════════════════════════════════════════════════
+//  LOAD TEMPLATE ON PAGE LOAD
+// ══════════════════════════════════════════════════
+window.addEventListener('DOMContentLoaded', async () => {
+  const st = document.getElementById('tplStatus');
+  try {
+    const resp = await fetch(TEMPLATE_URL);
+    if (!resp.ok) throw new Error('File not found');
+    templateBuffer = await resp.arrayBuffer();
+    st.textContent = '✅ Template ready';
+    st.className = 'tpl-status ok';
+  } catch (e) {
+    st.textContent = '❌ Template load failed — make sure DEMO.xlsx is in /template/ folder';
+    st.className = 'tpl-status err';
+  }
+});
+
+// ══════════════════════════════════════════════════
+//  UI HELPERS
+// ══════════════════════════════════════════════════
+const $ = id => document.getElementById(id);
+
+function setStep(n, state) { $('step'+n).className = 'step ' + state; }
+function showModal()        { $('typeModal').classList.add('show'); }
+function closeModal()       { $('typeModal').classList.remove('show'); }
+
+function showError(msg) {
+  $('errorMsg').textContent = msg;
+  $('errorAlert').classList.add('show');
+  $('successAlert').classList.remove('show');
+}
+function hideAlerts() {
+  $('errorAlert').classList.remove('show');
+  $('successAlert').classList.remove('show');
+}
+function setLoading(on, text) {
+  $('loadingDiv').classList.toggle('show', on);
+  if (text) $('loadingTitle').textContent = text;
+  $('proceedBtn').disabled = on;
+}
+
+// ══════════════════════════════════════════════════
+//  FILE UPLOAD HANDLING
+// ══════════════════════════════════════════════════
+const uploadZone = $('uploadZone');
+uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('dragover'); });
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
+uploadZone.addEventListener('drop', e => { e.preventDefault(); uploadZone.classList.remove('dragover'); if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); });
+$('fileInput').addEventListener('change', () => { if ($('fileInput').files[0]) handleFile($('fileInput').files[0]); });
+
+function handleFile(f) {
+  const ext = f.name.toLowerCase().split('.').pop();
+  if (!['xlsx','xls','csv'].includes(ext)) { showError('Please upload Excel (.xlsx/.xls) or CSV file.'); return; }
+  selectedFile = f;
+  uploadZone.classList.add('file-ok');
+  $('uploadIcon').textContent  = '✅';
+  $('uploadTitle').textContent = '✓ ' + f.name;
+  $('proceedBtn').disabled = !templateBuffer;
+  hideAlerts();
+  setStep(1, 'done'); setStep(2, 'active');
+}
+
+$('typeModal').addEventListener('click', e => { if (e.target === $('typeModal')) closeModal(); });
+
+// ══════════════════════════════════════════════════
+//  UTILITIES
+// ══════════════════════════════════════════════════
+
+function toNum(v)  { return parseFloat(String(v || 0).replace(/,/g,'')) || 0; }
+function toStr(v)  { const s = String(v || '').trim(); return (s === 'nan' || s === 'undefined') ? '' : s; }
+
+function parseDate(val) {
+  if (!val) return null;
+  if (val instanceof Date) return isNaN(val) ? null : val;
+  const s = String(val).trim();
+  if (!s || s === 'nan') return null;
+
+  // dd-Mon-yy / dd-Mon-yyyy
+  const m1 = s.match(/^(\d{1,2})[- ]([A-Za-z]{3})[- ](\d{2,4})$/);
+  if (m1) {
+    const yr = m1[3].length === 2 ? 2000 + parseInt(m1[3]) : parseInt(m1[3]);
+    const d = new Date(`${m1[2]} ${m1[1]}, ${yr}`);
+    if (!isNaN(d)) return d;
+  }
+  // MM/DD/YYYY
+  const m2 = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m2) return new Date(+m2[3], +m2[1]-1, +m2[2]);
+  // YYYY-MM-DD
+  const m3 = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m3) return new Date(+m3[1], +m3[2]-1, +m3[3]);
+
+  const d = new Date(s);
+  return isNaN(d) ? null : d;
+}
+
+function jsDateToExcel(date) {
+  // Excel epoch: Dec 30, 1899
+  const epoch = new Date(Date.UTC(1899, 11, 30));
+  return (date.getTime() - epoch.getTime()) / 86400000;
+}
+
+// Find data row by App ID (column 0); data[0] is header row → skip
+function findRow(data, appId) {
+  const target = String(Math.round(parseFloat(String(appId))));
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]).trim() === target) return data[i];
+  }
+  return null;
+}
+
+// Set a number/string cell (row & col are 1-based)
+function setCell(ws, row, col, value, type) {
+  const ref = XLSX.utils.encode_cell({ r: row-1, c: col-1 });
+  ws[ref] = { v: value, t: type };
+}
+
+// Set a date cell — stored as Excel serial number with date format
+function setDateCell(ws, row, col, date) {
+  if (!date || isNaN(date.getTime())) return;
+  const ref = XLSX.utils.encode_cell({ r: row-1, c: col-1 });
+  ws[ref] = { v: jsDateToExcel(date), t: 'n', z: 'DD-MMM-YY' };
+}
+
+// Delete all data rows from startRow onwards (1-based), keep header
+function clearDataRows(ws, startRow) {
+  if (!ws['!ref']) return;
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  for (let r = startRow-1; r <= range.e.r; r++) {
+    for (let c = range.s.c; c <= range.e.c; c++) {
+      const ref = XLSX.utils.encode_cell({ r, c });
+      if (ws[ref]) delete ws[ref];
+    }
+  }
+}
+
+async function fetchCSV(url) {
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching sheet`);
+  const text = await resp.text();
+  const result = Papa.parse(text, { header: false, skipEmptyLines: true });
+  return result.data;  // array of arrays; [0] = header
+}
+
+// ══════════════════════════════════════════════════
+//  BUSINESS LOGIC
+// ══════════════════════════════════════════════════
+
+// JX = Col L - Col R    (Total Paid)
+// JW = (Col L - Col R) - Col W   (Refund Received)
+function calcJxJw(appId, data) {
+  const row = findRow(data, appId);
+  if (!row) return { jx: 0, jw: 0 };
+  const l = toNum(row[11]);   // L = index 11
+  const r = toNum(row[17]);   // R = index 17
+  const w = toNum(row[22]);   // W = index 22
+  const jx = l - r;
+  const jw = jx - w;
+  return { jx: Math.round(jx*100)/100, jw: Math.round(jw*100)/100 };
+}
+
+// Date of Last Settlement calculation
+function calcJq(appId, jx, disbData, sheetData) {
+  const disbRow  = findRow(disbData,  appId);
+  const dataRow  = findRow(sheetData, appId);
+  if (!disbRow || !dataRow) return null;
+
+  const loan     = toNum(disbRow[2]);          // Tranche Amount
+  const te       = toNum(disbRow[4]) || 1;     // Number of EMIs
+  const intRate  = toNum(disbRow[8]) / 100;    // Total Regular Int rate ÷ 100
+  const ae       = toNum(disbRow[5]);          // Advance EMIs
+  const liveDate = parseDate(disbRow[3]);      // Loan Live Date
+
+  if (loan === 0) return null;
+
+  // Step 1 — EMI amount
+  const emi    = (loan / te) + (intRate * loan / te);
+  const advAmt = ae * emi;
+
+  // Step 2 — count full EMIs paid from normal paid amount
+  let remaining = Math.max(0, jx - advAmt);
+  let emisPaid  = 0;
+  for (let i = 0; i < Math.floor(te); i++) {
+    if (emi > 0 && remaining >= emi * 0.99) {
+      remaining -= emi;
+      emisPaid = i + 1;
+    } else break;
+  }
+
+  // Step 3 — First EMI date from DATA sheet Col J (index 9)
+  const firstEMI = parseDate(dataRow[9]);
+  if (!firstEMI) return null;
+
+  const effectiveFirst = new Date(firstEMI);
+  if (liveDate && firstEMI < liveDate) {
+    effectiveFirst.setMonth(effectiveFirst.getMonth() + 1);
+  }
+
+  // Step 4 — Last paid EMI date
+  const lastPaid = new Date(effectiveFirst);
+  if (emisPaid > 0) lastPaid.setMonth(lastPaid.getMonth() + (emisPaid - 1));
+
+  return lastPaid;
+}
+
+// ══════════════════════════════════════════════════
+//  MAIN: GENERATE EXCEL
+// ══════════════════════════════════════════════════
+async function generate(calcType) {
+  closeModal();
+  hideAlerts();
+  setStep(2, 'done'); setStep(3, 'active');
+  setLoading(true, `Starting ${calcType} generation...`);
+
+  try {
+    // 1 ── Parse uploaded App-ID file
+    const fileBuffer = await selectedFile.arrayBuffer();
+    let inputRows = [];
+
+    if (selectedFile.name.toLowerCase().endsWith('.csv')) {
+      const text = await selectedFile.text();
+      inputRows = Papa.parse(text, { header: false, skipEmptyLines: true }).data;
+    } else {
+      const wb_in = XLSX.read(new Uint8Array(fileBuffer), { type: 'array' });
+      const ws_in = wb_in.Sheets[wb_in.SheetNames[0]];
+      inputRows   = XLSX.utils.sheet_to_json(ws_in, { header: 1, defval: '' });
+    }
+
+    // Filter valid records
+    const records = [];
+    for (const row of inputRows) {
+      const aid = String(row[0] || '').trim();
+      const doc = String(row[1] || '').trim();
+      if (aid && !['nan','app id','appid'].includes(aid.toLowerCase())) {
+        const num = parseFloat(aid);
+        if (!isNaN(num)) records.push({ appId: Math.round(num), dateClosing: doc });
+      }
+    }
+
+    if (!records.length) { showError('No valid App IDs found in the uploaded file.'); setLoading(false); setStep(3,''); return; }
+
+    // 2 ── Fetch Google Sheets
+    setLoading(true, 'Fetching DISB Dump...');
+    let disbData, sheetData;
+    try { disbData = await fetchCSV(DISB_URL); } catch(e) { showError('Cannot fetch DISB Dump sheet. Make sure it is set to "Anyone with link can view".\n' + e.message); setLoading(false); setStep(3,''); return; }
+    setLoading(true, 'Fetching DATA sheet...');
+    try { sheetData = await fetchCSV(DATA_URL); } catch(e) { showError('Cannot fetch DATA sheet. Make sure it is set to "Anyone with link can view".\n' + e.message); setLoading(false); setStep(3,''); return; }
+
+    // 3 ── Load fresh template
+    setLoading(true, `Building ${calcType} Excel...`);
+    const wb = XLSX.read(new Uint8Array(templateBuffer.slice(0)), {
+      type: 'array', cellFormula: true, cellStyles: true, cellDates: false
+    });
+
+    const ddWs     = wb.Sheets['DD'];
+    const sheetName = calcType === 'Dropout' ? 'Dropout' : 'Foreclosures';
+    const tgtWs    = wb.Sheets[sheetName];
+
+    if (!ddWs || !tgtWs) { showError(`Sheet "${sheetName}" not found in template.`); setLoading(false); setStep(3,''); return; }
+
+    // 4 ── Clear DD data rows (keep row 1 = header)
+    clearDataRows(ddWs, 2);
+
+    // 5 ── Process each App ID
+    let ddRow = 2;
+    for (let i = 0; i < records.length; i++) {
+      const { appId, dateClosing } = records[i];
+      const excelRow = 3 + i;   // Excel rows start at 3 for data
+
+      // App ID in target sheet col B
+      setCell(tgtWs, excelRow, COL_B, appId, 'n');
+
+      // Fill DD sheet from DISB Dump
+      const dr = findRow(disbData, appId);
+      if (dr) {
+        setCell(ddWs,    ddRow, 1,  appId,           'n');
+        setCell(ddWs,    ddRow, 2,  toStr(dr[1]),    's');    // Student Name
+        setCell(ddWs,    ddRow, 3,  toNum(dr[2]),    'n');    // Tranche Amount
+        setDateCell(ddWs, ddRow, 4,  parseDate(dr[3]));       // Loan Live Date
+        setCell(ddWs,    ddRow, 5,  toNum(dr[4]),    'n');    // Number of EMIs
+        setCell(ddWs,    ddRow, 6,  toNum(dr[5]),    'n');    // Advance EMIs
+        setCell(ddWs,    ddRow, 7,  toNum(dr[6]),    'n');    // Net Tenure
+        setCell(ddWs,    ddRow, 8,  toNum(dr[7]),    'n');    // Discount Rate
+        setCell(ddWs,    ddRow, 9,  toNum(dr[8]),    'n');    // Total Regular Int rate
+        setCell(ddWs,    ddRow, 10, toNum(dr[9]),    'n');    // FLDG %
+        setCell(ddWs,    ddRow, 11, toStr(dr[10]),   's');    // Grp
+        setCell(ddWs,    ddRow, 12, toStr(dr[11]),   's');    // Lender
+        ddRow++;
+      }
+
+      // Calculate JX, JW, JQ
+      const { jx, jw } = calcJxJw(appId, sheetData);
+      const jq          = calcJq(appId, jx, disbData, sheetData);
+      const dateCl      = parseDate(dateClosing);
+
+      // Write as VALUES only (no formula) for these 4 cells
+      if (jq)     setDateCell(tgtWs, excelRow, COL_JQ, jq);
+      if (dateCl) setDateCell(tgtWs, excelRow, COL_JR, dateCl);
+      setCell(tgtWs, excelRow, COL_JW, jw, 'n');
+      setCell(tgtWs, excelRow, COL_JX, jx, 'n');
+    }
+
+    // 6 ── Write and trigger download
+    const out  = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+    const blob = new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    const ts   = new Date().toISOString().slice(0,19).replace(/[T:-]/g,'').slice(0,14);
+    a.download = `GQ_${calcType}_Output_${ts}.xlsx`;
+    a.href     = url;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    setStep(3, 'done');
+    $('successAlert').classList.add('show');
+    setLoading(false);
+
+  } catch (err) {
+    showError('Unexpected error: ' + err.message);
+    setStep(3,''); setLoading(false);
+    console.error(err);
+  }
+}
+</script>
+</body>
+</html>
