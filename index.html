@@ -441,12 +441,11 @@ async function generate(calcType){
     zip.file(tgtPath,tgtXml);
     zip.file(ddPath,ddXml);
 
-    // Clear calcChain so Excel recalculates VLOOKUPs — do NOT remove the file
-    // (removing it while it's still in [Content_Types].xml causes Excel "repair" dialog)
-    try{
-      var emptyChain='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<calcChain xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>';
-      zip.file("xl/calcChain.xml",emptyChain);
-    }catch(e){}
+    // Remove stray directory entries JSZip adds — Excel "repair" dialog if present
+    ["xl/","xl/worksheets/","xl/_rels/","xl/printerSettings/","xl/theme/","docProps/","_rels/"].forEach(function(d){
+      try{zip.remove(d);}catch(e){}
+    });
+    // Do NOT touch calcChain — keep original from template (Excel recalculates dirty cells on open)
 
     showLoad(true,"Saving file...","Writing Excel output",95);
     var out=await zip.generateAsync({type:"arraybuffer",compression:"DEFLATE",compressionOptions:{level:6}});
