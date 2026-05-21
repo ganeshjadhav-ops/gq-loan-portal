@@ -194,7 +194,9 @@ function lookup(idx,appId){return idx[String(Math.round(parseFloat(String(appId)
 function patchCell(xml,cellRef,value,sIdx){
   var esc=cellRef.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
   var newC="<c r=\""+cellRef+"\" s=\""+sIdx+"\"><v>"+value+"</v></c>";
-  var pat=new RegExp("<c r=\""+esc+"\"[^>]*>[\\s\\S]*?<\\/c>|<c r=\""+esc+"\"[^>]*\/>","g");
+  // IMPORTANT: self-closing alternative MUST come first — otherwise greedy [^>]* eats "/>"
+  // and [\s\S]*?<\/c> then swallows the next cell, corrupting the XML
+  var pat=new RegExp("<c r=\""+esc+"\"[^>]*\\/>" + "|" + "<c r=\""+esc+"\"[^>]*>[\\s\\S]*?<\\/c>","g");
   var result=xml.replace(pat,function(){return newC;});
   if(result===xml){
     // Cell missing from template row – insert at start of the row
@@ -439,8 +441,12 @@ async function generate(calcType){
     zip.file(tgtPath,tgtXml);
     zip.file(ddPath,ddXml);
 
-    // Remove cached calc chain so Excel recalculates VLOOKUP on open
-    try{zip.remove("xl/calcChain.xml");}catch(e){}
+    // Clear calcChain so Excel recalculates VLOOKUPs — do NOT remove the file
+    // (removing it while it's still in [Content_Types].xml causes Excel "repair" dialog)
+    try{
+      var emptyChain='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<calcChain xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>';
+      zip.file("xl/calcChain.xml",emptyChain);
+    }catch(e){}
 
     showLoad(true,"Saving file...","Writing Excel output",95);
     var out=await zip.generateAsync({type:"arraybuffer",compression:"DEFLATE",compressionOptions:{level:6}});
