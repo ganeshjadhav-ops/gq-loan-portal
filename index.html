@@ -3,6 +3,7 @@
 <title>GrayQuest Loan Portal</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
 
 *{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',Arial,sans-serif;}
@@ -188,22 +189,44 @@ function buildIndex(data){
 }
 function lookup(idx,appId){return idx[String(Math.round(parseFloat(String(appId))))]||null;}
 
-function setCell(ws,r,c,v,t){
-  ws[XLSX.utils.encode_cell({r:r-1,c:c-1})]={v:v,t:t};
-}
-function setDateCell(ws,r,c,d){
-  if(!d||isNaN(d.getTime()))return;
-  ws[XLSX.utils.encode_cell({r:r-1,c:c-1})]={v:jsDateToExcel(d),t:"n",z:"DD-MMM-YY"};
-}
-function clearDataRows(ws,sr){
-  if(!ws["!ref"])return;
-  var rng=XLSX.utils.decode_range(ws["!ref"]);
-  for(var r=sr-1;r<=rng.e.r;r++){
-    for(var c=rng.s.c;c<=rng.e.c;c++){
-      var ref=XLSX.utils.encode_cell({r:r,c:c});
-      if(ws[ref])delete ws[ref];
-    }
+// --- JSZip XML helpers ---
+// Patch a single cell in the sheet XML (preserves all other cells, styles, hidden cols, etc.)
+function patchCell(xml,cellRef,value,sIdx){
+  var esc=cellRef.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+  var newC="<c r=\""+cellRef+"\" s=\""+sIdx+"\"><v>"+value+"</v></c>";
+  var pat=new RegExp("<c r=\""+esc+"\"[^>]*>[\\s\\S]*?<\\/c>|<c r=\""+esc+"\"[^>]*\/>","g");
+  var result=xml.replace(pat,function(){return newC;});
+  if(result===xml){
+    // Cell missing from template row – insert at start of the row
+    var rowNum=cellRef.replace(/[A-Z]+/g,"");
+    result=result.replace(new RegExp("(<row r=\""+rowNum+"\"[^>]*>)"),function(m,open){return open+newC;});
   }
+  return result;
+}
+function escXml(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+function buildDDData(records){
+  var rows="",filled=0,ddRow=2;
+  for(var i=0;i<records.length;i++){
+    var appId=records[i].appId,dr=lookup(disbIdx,appId);
+    if(!dr)continue;
+    var live=parseDate(dr[B_LIVE]);
+    var cells="";
+    cells+="<c r=\"A"+ddRow+"\" s=\"14\"><v>"+appId+"</v></c>";
+    cells+="<c r=\"B"+ddRow+"\" s=\"14\" t=\"inlineStr\"><is><t>"+escXml(toStr(dr[B_NAME]))+"</t></is></c>";
+    cells+="<c r=\"C"+ddRow+"\" s=\"14\"><v>"+toNum(dr[B_TRNCH])+"</v></c>";
+    if(live)cells+="<c r=\"D"+ddRow+"\" s=\"64\"><v>"+jsDateToExcel(live)+"</v></c>";
+    cells+="<c r=\"E"+ddRow+"\" s=\"14\"><v>"+toNum(dr[B_NEMI])+"</v></c>";
+    cells+="<c r=\"F"+ddRow+"\" s=\"14\"><v>"+toNum(dr[B_AEMI])+"</v></c>";
+    cells+="<c r=\"G"+ddRow+"\" s=\"14\"><v>"+toNum(dr[B_NTEN])+"</v></c>";
+    cells+="<c r=\"H"+ddRow+"\" s=\"14\"><v>"+toNum(dr[B_DISC])+"</v></c>";
+    cells+="<c r=\"I"+ddRow+"\" s=\"14\"><v>"+toNum(dr[B_INTR])+"</v></c>";
+    cells+="<c r=\"J"+ddRow+"\" s=\"14\"><v>"+toNum(dr[B_FLDG])+"</v></c>";
+    cells+="<c r=\"K"+ddRow+"\" s=\"14\" t=\"inlineStr\"><is><t>"+escXml(toStr(dr[B_GRP]))+"</t></is></c>";
+    cells+="<c r=\"L"+ddRow+"\" s=\"14\" t=\"inlineStr\"><is><t>"+escXml(toStr(dr[B_LEND]))+"</t></is></c>";
+    rows+="<row r=\""+ddRow+"\" spans=\"1:12\">"+cells+"</row>";
+    ddRow++;filled++;
+  }
+  return{rows:rows,lastRow:ddRow-1,filled:filled};
 }
 
 function calcJxJw(appId){
@@ -351,78 +374,84 @@ async function generate(calcType){
   var dbg=[];
   try{
     if(!tmplBuf)throw new Error("Template not loaded. Please refresh.");
-    var wb=XLSX.read(new Uint8Array(tmplBuf.slice(0)),{type:"array",cellFormula:true,cellDates:false});
-    var sName=calcType==="Dropout"?"Dropout":"Foreclosures";
-    var ddWs=wb.Sheets["DD"],tgtWs=wb.Sheets[sName];
-    if(!ddWs)throw new Error("DD sheet not found in template!");
-    if(!tgtWs)throw new Error(sName+" sheet not found in template!");
+    if(typeof JSZip==="undefined")throw new Error("JSZip library not loaded. Check network connection.");
 
-    clearDataRows(ddWs,2);
+    // ── JSZip approach: load template as ZIP, patch XML directly ──
+    // This preserves EVERYTHING in the template:
+    //   ✅ Hidden columns (cols section untouched)
+    //   ✅ All 79 cell styles / colors / borders (styles.xml untouched)
+    //   ✅ Date format s=17 for JQ/JR (numFmtId=15 = d-mmm-yy)
+    //   ✅ Accounting integer format s=6 for JW/JX
+    //   ✅ Frozen pane, row heights, print settings
+    //   ✅ All VLOOKUP formulas in columns C-JO preserved
+
+    var zip=await JSZip.loadAsync(tmplBuf.slice(0));
+    var tgtPath=calcType==="Dropout"?"xl/worksheets/sheet1.xml":"xl/worksheets/sheet2.xml";
+    var ddPath="xl/worksheets/sheet3.xml";
+
+    var tgtXml=await zip.file(tgtPath).async("string");
+    var ddXml=await zip.file(ddPath).async("string");
+
     dbg.push({c:"nf",t:"Processing "+records.length+" App IDs for "+calcType});
+    var filled=0,skipped=0;
 
-    var ddRow=2,filled=0,skipped=0;
     for(var i=0;i<records.length;i++){
       var appId=records[i].appId,dateClosing=records[i].dateClosing;
       var exRow=3+i;
-      showLoad(true,"Building "+calcType+"...","Row "+(i+1)+"/"+records.length+" -- App "+appId,Math.round((i+1)/records.length*85));
+      showLoad(true,"Building "+calcType+"...","Row "+(i+1)+"/"+records.length+" -- App "+appId,Math.round((i+1)/records.length*80));
 
-      setCell(tgtWs,exRow,COL_B,appId,"n");
-
-      var dr=lookup(disbIdx,appId);
-      if(dr){
-        setCell(ddWs,ddRow,1,appId,"n");
-        setCell(ddWs,ddRow,2,toStr(dr[B_NAME]),"s");
-        setCell(ddWs,ddRow,3,toNum(dr[B_TRNCH]),"n");
-        setDateCell(ddWs,ddRow,4,parseDate(dr[B_LIVE]));
-        setCell(ddWs,ddRow,5,toNum(dr[B_NEMI]),"n");
-        setCell(ddWs,ddRow,6,toNum(dr[B_AEMI]),"n");
-        setCell(ddWs,ddRow,7,toNum(dr[B_NTEN]),"n");
-        setCell(ddWs,ddRow,8,toNum(dr[B_DISC]),"n");
-        setCell(ddWs,ddRow,9,toNum(dr[B_INTR]),"n");
-        setCell(ddWs,ddRow,10,toNum(dr[B_FLDG]),"n");
-        setCell(ddWs,ddRow,11,toStr(dr[B_GRP]),"s");
-        setCell(ddWs,ddRow,12,toStr(dr[B_LEND]),"s");
-        ddRow++;filled++;
-      }else{
-        skipped++;
-        dbg.push({c:"wn",t:"App "+appId+" -- not in DISB Dump, skipped"});
-      }
+      // Col B = App ID  (s=1: border style, matches template)
+      tgtXml=patchCell(tgtXml,"B"+exRow,appId,1);
 
       var res=calcJxJw(appId);
       var jx=res.jx,jw=res.jw;
       var jq=calcJq(appId,jx);
       var dc=parseDate(dateClosing);
 
-      if(jq)setDateCell(tgtWs,exRow,COL_JQ,jq);
-      if(dc)setDateCell(tgtWs,exRow,COL_JR,dc);
-      setCell(tgtWs,exRow,COL_JW,jw,"n");
-      setCell(tgtWs,exRow,COL_JX,jx,"n");
+      // JQ = Date of Last Settlement  (s=17: numFmtId=15 = d-mmm-yy, with border)
+      if(jq)tgtXml=patchCell(tgtXml,"JQ"+exRow,jsDateToExcel(jq),17);
 
+      // JR = Date of Closing          (s=17: numFmtId=15 = d-mmm-yy, with border)
+      if(dc)tgtXml=patchCell(tgtXml,"JR"+exRow,jsDateToExcel(dc),17);
+
+      // JW = Refund, JX = Total Paid  (s=6: numFmtId=165 = accounting integer, with border)
+      tgtXml=patchCell(tgtXml,"JW"+exRow,Math.round(jw),6);
+      tgtXml=patchCell(tgtXml,"JX"+exRow,Math.round(jx),6);
+
+      var dr=lookup(disbIdx,appId);
+      if(dr){filled++;}else{skipped++;dbg.push({c:"wn",t:"App "+appId+" -- not in DISB Dump"});}
       if(i<5)dbg.push({c:"ok",t:"App "+appId+": JX="+jx+" JW="+jw+" JQ="+(jq?jq.toLocaleDateString("en-IN"):"--")+" Close="+(dc?dc.toLocaleDateString("en-IN"):dateClosing||"--")});
     }
 
-    // KEY FIX: Update DD sheet !ref to include ALL filled rows
-    // Without this SheetJS only writes original 2-row range, extra rows are lost!
-    var ddLastRow=ddRow-1;
-    ddWs["!ref"]=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:ddLastRow-1,c:11}});
+    // ── Rebuild DD sheet (keep header row 1, replace data rows 2+) ──
+    var ddResult=buildDDData(records);
+    var headerRow=(ddXml.match(/<row r="1"[^>]*>[\s\S]*?<\/row>/)||[""])[0];
+    ddXml=ddXml.replace(/<sheetData>[\s\S]*?<\/sheetData>/,
+      "<sheetData>"+headerRow+ddResult.rows+"</sheetData>");
+    // Update dimension tag
+    var ddLast=Math.max(2,ddResult.lastRow);
+    ddXml=ddXml.replace(/(<dimension ref=")[^"]*(")/,"$1A1:L"+ddLast+"$2");
 
-    // Expand target sheet !ref if needed
-    var tgtRng=XLSX.utils.decode_range(tgtWs["!ref"]||"A1:A1");
-    var neededLastRow=2+records.length;
-    if(tgtRng.e.r<neededLastRow){tgtRng.e.r=neededLastRow;tgtWs["!ref"]=XLSX.utils.encode_range(tgtRng);}
+    dbg.push({c:ddResult.filled>0?"ok":"er",
+      t:(ddResult.filled>0?"OK":"FAIL")+" DD sheet: "+ddResult.filled+"/"+records.length+" rows | A1:L"+ddLast});
 
-    dbg.push({c:filled>0?"ok":"er",t:(filled>0?"OK":"FAIL")+" DD sheet: "+filled+"/"+records.length+" rows in file | ref=A1:L"+ddLastRow});
+    // Write back modified XMLs (everything else in ZIP is untouched)
+    zip.file(tgtPath,tgtXml);
+    zip.file(ddPath,ddXml);
+
+    // Remove cached calc chain so Excel recalculates VLOOKUP on open
+    try{zip.remove("xl/calcChain.xml");}catch(e){}
 
     showLoad(true,"Saving file...","Writing Excel output",95);
-    var out=XLSX.write(wb,{type:"array",bookType:"xlsx",compression:true});
+    var out=await zip.generateAsync({type:"arraybuffer",compression:"DEFLATE",compressionOptions:{level:6}});
     var blob=new Blob([out],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
     var url=URL.createObjectURL(blob),a=document.createElement("a");
     a.download="GQ_"+calcType+"_"+new Date().toISOString().slice(0,10).replace(/-/g,"")+".xlsx";
     a.href=url;document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
 
     setStep(4,"done");
-    showOk("Excel downloaded! DD sheet: "+filled+" rows filled.");
-    if(skipped)showWarn(skipped+" App ID(s) not in DISB Dump -- those rows will show #N/A in formulas.");
+    showOk("Excel downloaded! "+records.length+" rows processed, DD: "+ddResult.filled+" filled.");
+    if(skipped)showWarn(skipped+" App ID(s) not in DISB Dump — those rows will show #N/A in formulas.");
     showDbg(dbg);showLoad(false,"","",100);
   }catch(err){
     showErr("Error: "+err.message);
