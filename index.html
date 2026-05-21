@@ -411,6 +411,35 @@ async function generate(calcType){
       if(i<5)dbg.push({c:"ok",t:"App "+appId+": JX="+jx+" JW="+jw+" JQ="+(jq?jq.toLocaleDateString("en-IN"):"--")+" Close="+(dc?dc.toLocaleDateString("en-IN"):dateClosing||"--")});
     }
 
+    // ── STALE CACHE FIX ──────────────────────────────────────────────────────
+    // Template formula cells carry old <v> cached values (e.g. "Yamini Soni",
+    // #N/A). Strip them from ONLY the rows we populated so Excel has NO choice
+    // but to compute fresh VLOOKUP results when the file opens.
+    // Two patterns: (a) full formula <f>...</f><v>stale</v>
+    //               (b) shared-formula ref <f .../><v>stale</v>
+    var popRows={};
+    for(var pi=0;pi<records.length;pi++) popRows[3+pi]=true;
+
+    // (a) full formula cells — strip t= attribute + <v> cached value
+    tgtXml=tgtXml.replace(
+      /<c r="([A-Z]+)(\d+)" s="(\d+)"(?: t="[^"]*")?><f([^>]*)>([\s\S]*?)<\/f><v>[^<]*<\/v><\/c>/g,
+      function(m,col,rn,si,fa,fm){
+        return popRows[+rn]
+          ? '<c r="'+col+rn+'" s="'+si+'"><f'+fa+'>'+fm+'</f></c>'
+          : m;
+      }
+    );
+    // (b) shared-formula reference cells (self-closing <f/>)
+    tgtXml=tgtXml.replace(
+      /<c r="([A-Z]+)(\d+)" s="(\d+)"(?: t="[^"]*")?><f([^>]*)\/><v>[^<]*<\/v><\/c>/g,
+      function(m,col,rn,si,fa){
+        return popRows[+rn]
+          ? '<c r="'+col+rn+'" s="'+si+'"><f'+fa+'/></c>'
+          : m;
+      }
+    );
+    // ─────────────────────────────────────────────────────────────────────────
+
     // Rebuild DD sheet: keep header row 1 from template, replace data rows 2+
     var ddResult=buildDDData(records);
     var hdr=(ddXml.match(/<row r="1"[^>]*>[\s\S]*?<\/row>/)||[""])[0];
