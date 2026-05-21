@@ -420,7 +420,15 @@ async function generate(calcType){
 
     zip.file(tgtPath,tgtXml);
     zip.file("xl/worksheets/sheet3.xml",ddXml);
-    // calcChain kept as-is from template — Excel recalculates dirty cells on open
+
+    // Force Excel to recalculate ALL formulas (VLOOKUP etc.) on open
+    // Without this, Excel uses the stale calcChain cache from the template
+    var wbXml=await zip.file("xl/workbook.xml").async("string");
+    wbXml=wbXml.replace(/<calcPr([^>]*?)(\s*\/>|>)/,function(m,attrs,close){
+      if(attrs.indexOf("fullCalcOnLoad")>=0) return m;
+      return "<calcPr"+attrs+' fullCalcOnLoad="1"'+close;
+    });
+    zip.file("xl/workbook.xml",wbXml);
 
     showLoad(true,"Saving file...","Writing Excel output",95);
     var out=await zip.generateAsync({type:"arraybuffer",compression:"DEFLATE",compressionOptions:{level:6}});
