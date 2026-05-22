@@ -238,15 +238,16 @@ function calcJxJw(appId){
   var l=toNum(row[D_TPAY]),r=toNum(row[D_TCHG]),w=toNum(row[D_ASETL]);
   return{jx:Math.round((l-r)*100)/100,jw:Math.round((l-r-w)*100)/100};
 }
-function calcJq(appId,jx){
+function calcJq(appId,jx,jw){
   var dr=lookup(disbIdx,appId),sr=lookup(dataIdx,appId);
   if(!dr||!sr)return null;
   var loan=toNum(dr[B_TRNCH]),te=toNum(dr[B_NEMI])||1;
-  var intR=toNum(dr[B_INTR])/100,ae=toNum(dr[B_AEMI]);
+  var intR=toNum(dr[B_INTR])/100;
   var live=parseDate(dr[B_LIVE]);
   if(!loan)return null;
-  var emi=(loan/te)+(intR*loan/te),adv=ae*emi;
-  var rem=Math.max(0,jx-adv),ep=0;
+  var emi=(loan/te)+(intR*loan/te);
+  // Use JW (Refund Received) to find amount settled to lender, then count EMIs
+  var rem=Math.max(0,jx-jw),ep=0;
   for(var i=0;i<Math.floor(te);i++){
     if(emi>0&&rem>=emi*0.99){rem-=emi;ep=i+1;}else break;
   }
@@ -398,7 +399,7 @@ async function generate(calcType){
 
       var res=calcJxJw(appId);
       var jx=res.jx,jw=res.jw;
-      var jq=calcJq(appId,jx);
+      var jq=calcJq(appId,jx,jw);
       var dc=parseDate(dateClosing);
 
       if(jq)tgtXml=patchCell(tgtXml,"JQ"+exRow,jsDateToExcel(jq),30); // s=30: d-mmm-yy
