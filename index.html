@@ -214,18 +214,18 @@ function buildDDData(records){
     if(!dr)continue;
     var live=parseDate(dr[B_LIVE]);
     var c="";
-    c+="<c r=\"A"+ddRow+"\" s=\"14\"><v>"+appId+"</v></c>";
-    c+="<c r=\"B"+ddRow+"\" s=\"14\" t=\"inlineStr\"><is><t>"+escXml(toStr(dr[B_NAME]))+"</t></is></c>";
-    c+="<c r=\"C"+ddRow+"\" s=\"14\"><v>"+toNum(dr[B_TRNCH])+"</v></c>";
-    if(live)c+="<c r=\"D"+ddRow+"\" s=\"64\"><v>"+jsDateToExcel(live)+"</v></c>";
-    c+="<c r=\"E"+ddRow+"\" s=\"14\"><v>"+toNum(dr[B_NEMI])+"</v></c>";
-    c+="<c r=\"F"+ddRow+"\" s=\"14\"><v>"+toNum(dr[B_AEMI])+"</v></c>";
-    c+="<c r=\"G"+ddRow+"\" s=\"14\"><v>"+toNum(dr[B_NTEN])+"</v></c>";
-    c+="<c r=\"H"+ddRow+"\" s=\"14\"><v>"+toNum(dr[B_DISC])+"</v></c>";
-    c+="<c r=\"I"+ddRow+"\" s=\"14\"><v>"+toNum(dr[B_INTR])+"</v></c>";
-    c+="<c r=\"J"+ddRow+"\" s=\"14\"><v>"+toNum(dr[B_FLDG])+"</v></c>";
-    c+="<c r=\"K"+ddRow+"\" s=\"14\" t=\"inlineStr\"><is><t>"+escXml(toStr(dr[B_GRP]))+"</t></is></c>";
-    c+="<c r=\"L"+ddRow+"\" s=\"14\" t=\"inlineStr\"><is><t>"+escXml(toStr(dr[B_LEND]))+"</t></is></c>";
+    c+="<c r=\"A"+ddRow+"\" s=\"1\"><v>"+appId+"</v></c>";
+    c+="<c r=\"B"+ddRow+"\" s=\"1\" t=\"inlineStr\"><is><t>"+escXml(toStr(dr[B_NAME]))+"</t></is></c>";
+    c+="<c r=\"C"+ddRow+"\" s=\"1\"><v>"+toNum(dr[B_TRNCH])+"</v></c>";
+    if(live)c+="<c r=\"D"+ddRow+"\" s=\"14\"><v>"+jsDateToExcel(live)+"</v></c>";
+    c+="<c r=\"E"+ddRow+"\" s=\"1\"><v>"+toNum(dr[B_NEMI])+"</v></c>";
+    c+="<c r=\"F"+ddRow+"\" s=\"1\"><v>"+toNum(dr[B_AEMI])+"</v></c>";
+    c+="<c r=\"G"+ddRow+"\" s=\"1\"><v>"+toNum(dr[B_NTEN])+"</v></c>";
+    c+="<c r=\"H"+ddRow+"\" s=\"1\"><v>"+toNum(dr[B_DISC])+"</v></c>";
+    c+="<c r=\"I"+ddRow+"\" s=\"1\"><v>"+toNum(dr[B_INTR])+"</v></c>";
+    c+="<c r=\"J"+ddRow+"\" s=\"1\"><v>"+toNum(dr[B_FLDG])+"</v></c>";
+    c+="<c r=\"K"+ddRow+"\" s=\"1\" t=\"inlineStr\"><is><t>"+escXml(toStr(dr[B_GRP]))+"</t></is></c>";
+    c+="<c r=\"L"+ddRow+"\" s=\"1\" t=\"inlineStr\"><is><t>"+escXml(toStr(dr[B_LEND]))+"</t></is></c>";
     rows+="<row r=\""+ddRow+"\" spans=\"1:12\">"+c+"</row>";
     ddRow++;filled++;
   }
@@ -394,17 +394,17 @@ async function generate(calcType){
       var exRow=3+i;
       showLoad(true,"Building "+calcType+"...","Row "+(i+1)+"/"+records.length+" -- App "+appId,Math.round((i+1)/records.length*80));
 
-      tgtXml=patchCell(tgtXml,"B"+exRow,appId,1);
+      tgtXml=patchCell(tgtXml,"B"+exRow,appId,1);   // s=1: General+border
 
       var res=calcJxJw(appId);
       var jx=res.jx,jw=res.jw;
       var jq=calcJq(appId,jx);
       var dc=parseDate(dateClosing);
 
-      if(jq)tgtXml=patchCell(tgtXml,"JQ"+exRow,jsDateToExcel(jq),17);
-      if(dc)tgtXml=patchCell(tgtXml,"JR"+exRow,jsDateToExcel(dc),17);
-      tgtXml=patchCell(tgtXml,"JW"+exRow,Math.round(jw),6);
-      tgtXml=patchCell(tgtXml,"JX"+exRow,Math.round(jx),6);
+      if(jq)tgtXml=patchCell(tgtXml,"JQ"+exRow,jsDateToExcel(jq),30); // s=30: d-mmm-yy
+      if(dc)tgtXml=patchCell(tgtXml,"JR"+exRow,jsDateToExcel(dc),30); // s=30: d-mmm-yy
+      tgtXml=patchCell(tgtXml,"JW"+exRow,Math.round(jw),25);           // s=25: accounting int
+      tgtXml=patchCell(tgtXml,"JX"+exRow,Math.round(jx),25);           // s=25: accounting int
 
       var dr=lookup(disbIdx,appId);
       if(dr){filled++;}else{skipped++;dbg.push({c:"wn",t:"App "+appId+" -- not in DISB Dump"});}
@@ -421,23 +421,14 @@ async function generate(calcType){
     zip.file(tgtPath,tgtXml);
     zip.file("xl/worksheets/sheet3.xml",ddXml);
 
-    // ── FORCE FULL RECALCULATION ─────────────────────────────────────────────
-    // 1) fullCalcOnLoad="1" in workbook.xml — Excel recalculates everything on open
+    // Force full recalculation on open — Excel ignores calcChain & recomputes
+    // all VLOOKUP formulas fresh. calcChain kept as-is (touching it = repair dialog).
     var wbXml=await zip.file("xl/workbook.xml").async("string");
     wbXml=wbXml.replace(/<calcPr([^>]*?)(\s*\/>|>)/,function(m,attrs,close){
       if(attrs.indexOf("fullCalcOnLoad")>=0) return m;
       return "<calcPr"+attrs+' fullCalcOnLoad="1"'+close;
     });
     zip.file("xl/workbook.xml",wbXml);
-
-    // 2) Clear calcChain (keep file so [Content_Types].xml ref stays valid,
-    //    but empty it so Excel has NO stale calculation order to rely on).
-    //    Combined with fullCalcOnLoad this guarantees fresh VLOOKUP results.
-    zip.file("xl/calcChain.xml",
-      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'+
-      '<calcChain xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'+
-      '</calcChain>');
-    // ─────────────────────────────────────────────────────────────────────────
 
     showLoad(true,"Saving file...","Writing Excel output",95);
     var out=await zip.generateAsync({type:"arraybuffer",compression:"DEFLATE",compressionOptions:{level:6}});
