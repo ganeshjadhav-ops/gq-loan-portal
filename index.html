@@ -81,6 +81,17 @@ body{background:#f0f4f8;min-height:100vh;}
 .dbg-box.hidden{display:none;}
 .dbg{padding:2px 0;border-bottom:1px solid #1e293b;}
 .ok{color:#4ade80;} .er{color:#f87171;} .nf{color:#93c5fd;} .wn{color:#fbbf24;}
+.input-tabs{display:flex;gap:0;margin-bottom:14px;border-bottom:2px solid #e2e8f0;}
+.input-tab{padding:8px 20px;font-size:13px;font-weight:600;cursor:pointer;border:none;background:transparent;color:#94a3b8;border-bottom:2.5px solid transparent;margin-bottom:-2px;transition:all .2s;}
+.input-tab.active{color:#1a3a6b;border-bottom-color:#1a3a6b;}
+.input-tab:hover:not(.active){color:#1a3a6b;background:#f5f8fd;border-radius:6px 6px 0 0;}
+.paste-area{width:100%;min-height:130px;border:2px solid #c7d7ed;border-radius:10px;padding:12px 14px;font-size:13px;font-family:'Segoe UI',Arial,sans-serif;resize:vertical;color:#1a3a6b;outline:none;transition:border .2s;}
+.paste-area:focus{border-color:#1a3a6b;}
+.paste-area::placeholder{color:#94a3b8;}
+.paste-hint{font-size:11.5px;color:#64748b;margin-top:7px;}
+.last-file-bar{display:none;align-items:center;gap:8px;background:#f0f7ff;border:1.5px solid #bfdbfe;border-radius:8px;padding:8px 14px;margin-bottom:14px;font-size:12.5px;color:#1a3a6b;}
+.last-file-bar.show{display:flex;}
+.last-file-bar span{font-weight:600;}
 
 </style></head><body>
 <div class="sidebar">
@@ -107,13 +118,29 @@ body{background:#f0f4f8;min-height:100vh;}
 <div class="step-line"></div>
 <div class="step" id="step4"><div class="step-circle">4</div><div class="step-label">Download Excel</div></div>
 </div>
-<div class="card"><div class="card-title">&#128193; Upload App ID File</div>
+<div class="card"><div class="card-title">&#128193; App ID Input</div>
+<!-- Last file reference bar -->
+<div class="last-file-bar" id="lastFileBar">&#128196; Last file: <span id="lastFileName">—</span></div>
+<!-- Input mode tabs -->
+<div class="input-tabs">
+  <button class="input-tab active" id="tabUpload" onclick="switchTab('upload')">&#128193; Upload File</button>
+  <button class="input-tab" id="tabPaste" onclick="switchTab('paste')">&#9998; Type / Paste</button>
+</div>
+<!-- Upload tab -->
+<div id="panelUpload">
 <div class="upload-zone disabled" id="dropZone">
 <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" onchange="onFileSelect(this.files[0])" disabled>
 <div class="upload-icon">&#128193;</div>
 <div class="upload-text"><strong>Click to browse</strong> or drag &amp; drop<br>
 <span style="font-size:12px;display:block;margin-top:6px;"><b>Col A:</b> App ID &nbsp;|&nbsp; <b>Col B:</b> Date of Closing (e.g. 13-Mar-26)</span></div></div>
-<div class="file-info" id="fileInfo">
+</div>
+<!-- Paste tab -->
+<div id="panelPaste" style="display:none;">
+<textarea class="paste-area" id="pasteInput" placeholder="Paste or type App IDs here. One row per line:&#10;&#10;App ID&#9;Date of Closing&#10;1190050&#9;13-Mar-26&#10;1664638&#9;15-Apr-26&#10;&#10;Tab or space between App ID and Date is fine." oninput="onPasteInput()"></textarea>
+<div class="paste-hint">&#9432; Format: <b>App ID</b> [Tab or Space] <b>Date of Closing</b> — one per line. Date e.g. <b>13-Mar-26</b> or <b>13-03-2026</b></div>
+</div>
+<!-- File info / generate -->
+<div class="file-info" id="fileInfo" style="margin-top:14px;">
 <span style="font-size:22px;">&#128196;</span>
 <div style="flex:1;"><div id="fName" style="font-weight:600;color:#1a3a6b;font-size:14px;"></div>
 <div id="fSize" style="color:#64748b;font-size:12px;"></div>
@@ -327,6 +354,53 @@ function lockUpload(locked){
   else{dz.classList.remove("disabled");fi.disabled=false;}
 }
 
+// ── Tab switching ──
+var activeTab="upload";
+function switchTab(tab){
+  activeTab=tab;
+  ge("tabUpload").className="input-tab"+(tab==="upload"?" active":"");
+  ge("tabPaste").className="input-tab"+(tab==="paste"?" active":"");
+  ge("panelUpload").style.display=tab==="upload"?"":"none";
+  ge("panelPaste").style.display=tab==="paste"?"":"none";
+  // Reset state when switching
+  records=[];ge("fileInfo").classList.remove("show");ge("genBtn").disabled=true;
+  hideAlerts();ge("dbgBox").classList.add("hidden");
+  if(tab==="paste"){setStep(2,"active");}else{setStep(2,"");}
+}
+
+// ── Paste/Type input ──
+function onPasteInput(){
+  var raw=ge("pasteInput").value;
+  var lines=raw.split(/\r?\n/);
+  records=[];
+  for(var i=0;i<lines.length;i++){
+    var line=lines[i].trim();
+    if(!line)continue;
+    // Split on tab, multiple spaces, or comma
+    var parts=line.split(/\t|,|  +/).map(function(p){return p.trim();}).filter(Boolean);
+    if(parts.length<1)continue;
+    var aid=parts[0];
+    var doc=parts.length>=2?parts.slice(1).join(" "):"";
+    if(["app id","appid","application id"].indexOf(aid.toLowerCase())>=0)continue;
+    var n=parseFloat(aid.replace(/,/g,""));
+    if(!isNaN(n))records.push({appId:Math.round(n),dateClosing:doc});
+  }
+  if(!records.length){
+    ge("fileInfo").classList.remove("show");ge("genBtn").disabled=true;
+    if(raw.trim())showErr("No valid App IDs found. Check format.");
+    else hideAlerts();
+    return;
+  }
+  hideAlerts();
+  ge("fName").textContent="Pasted data — "+records.length+" row"+(records.length>1?"s":"");
+  ge("fSize").textContent="Manual input";
+  ge("fileInfo").classList.add("show");
+  ge("matchBadge").style.display="none";
+  ge("genBtn").disabled=true;
+  setStep(2,"done");setStep(3,"active");
+  validateRecords();
+}
+
 function onFileSelect(file){
   if(!file)return;
   selFile=file;records=[];
@@ -336,6 +410,9 @@ function onFileSelect(file){
   ge("matchBadge").style.display="none";
   ge("genBtn").disabled=true;
   hideAlerts();ge("dbgBox").classList.add("hidden");
+  // Update last file reference
+  ge("lastFileName").textContent=file.name;
+  ge("lastFileBar").classList.add("show");
   setStep(2,"active");parseFile(file);
 }
 async function parseFile(file){
