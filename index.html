@@ -125,6 +125,7 @@ body{background:#f0f4f8;min-height:100vh;}
 <div class="input-tabs">
   <button class="input-tab active" id="tabUpload" onclick="switchTab('upload')">&#128193; Upload File</button>
   <button class="input-tab" id="tabPaste" onclick="switchTab('paste')">&#9998; Type / Paste</button>
+  <button class="input-tab" id="tabAppId" onclick="switchTab('appid')">&#128203; App ID Only</button>
 </div>
 <!-- Upload tab -->
 <div id="panelUpload">
@@ -139,13 +140,19 @@ body{background:#f0f4f8;min-height:100vh;}
 <textarea class="paste-area" id="pasteInput" placeholder="Paste or type App IDs here. One row per line:&#10;&#10;App ID&#9;Date of Closing&#10;1190050&#9;13-Mar-26&#10;1664638&#9;15-Apr-26&#10;&#10;Tab or space between App ID and Date is fine." oninput="onPasteInput()"></textarea>
 <div class="paste-hint">&#9432; Format: <b>App ID</b> [Tab or Space] <b>Date of Closing</b> — one per line. Date e.g. <b>13-Mar-26</b> or <b>13-03-2026</b></div>
 </div>
+<!-- App ID Only tab -->
+<div id="panelAppId" style="display:none;">
+<textarea class="paste-area" id="appIdInput" placeholder="Paste App IDs here — one per line:&#10;&#10;1190050&#10;1664638&#10;1234567" oninput="onAppIdInput()"></textarea>
+<div class="paste-hint">&#9432; <b>App ID only</b> — one per line. Date of Closing will be selected when you click Generate.</div>
+</div>
 <!-- File info / generate -->
 <div class="file-info" id="fileInfo" style="margin-top:14px;">
 <span style="font-size:22px;">&#128196;</span>
 <div style="flex:1;"><div id="fName" style="font-weight:600;color:#1a3a6b;font-size:14px;"></div>
 <div id="fSize" style="color:#64748b;font-size:12px;"></div>
 <div id="matchBadge" class="match-badge" style="display:none;"></div></div>
-<button class="btn btn-primary btn-sm" id="genBtn" onclick="openModal()" disabled>Generate &rarr;</button></div>
+<button class="btn btn-primary btn-sm" id="genBtn" onclick="openModal()" disabled>Generate &rarr;</button>
+<button class="btn btn-outline btn-sm" id="refreshBtn" onclick="refreshAll()" style="margin-left:6px;">&#128260; Refresh</button></div>
 <div class="alert alert-error" id="errAlert"><span>&#10060;</span><span id="errMsg"></span></div>
 <div class="alert alert-success" id="okAlert"><span>&#9989;</span><span id="okMsg"></span></div>
 <div class="alert alert-warn" id="warnAlert"><span>&#9888;</span><span id="warnMsg"></span></div>
@@ -158,6 +165,17 @@ body{background:#f0f4f8;min-height:100vh;}
 <b>3. Select Type</b> -- Choose Dropout or Foreclosure. Excel built from synced data.<br>
 <b>4. Download</b> -- All formulas intact. JQ, JR, JW, JX written as values only.
 </div></div></div>
+<div class="modal-overlay" id="datePicker"><div class="modal">
+<h2>Select Closing Date</h2><p>Pick the Date of Closing for all App IDs in this batch.</p>
+<div style="margin:18px 0;">
+  <label style="font-weight:600;font-size:14px;color:#1a3a6b;">Date of Closing</label>
+  <input type="date" id="closingDateInput" style="display:block;width:100%;margin-top:8px;padding:10px;border:1.5px solid #cbd5e1;border-radius:8px;font-size:16px;box-sizing:border-box;">
+</div>
+<div class="modal-btns">
+<button class="btn-do" onclick="confirmDate()">Confirm &#8594;</button>
+</div>
+<button class="btn btn-outline" style="width:100%;margin-top:12px;" onclick="closeDatePicker()">Cancel</button>
+</div></div>
 <div class="modal-overlay" id="modal"><div class="modal">
 <h2>Select Calculation Type</h2><p>Choose the sheet to generate for the uploaded App IDs.</p>
 <div class="modal-btns">
@@ -360,12 +378,14 @@ function switchTab(tab){
   activeTab=tab;
   ge("tabUpload").className="input-tab"+(tab==="upload"?" active":"");
   ge("tabPaste").className="input-tab"+(tab==="paste"?" active":"");
+  ge("tabAppId").className="input-tab"+(tab==="appid"?" active":"");
   ge("panelUpload").style.display=tab==="upload"?"":"none";
   ge("panelPaste").style.display=tab==="paste"?"":"none";
+  ge("panelAppId").style.display=tab==="appid"?"":"none";
   // Reset state when switching
   records=[];ge("fileInfo").classList.remove("show");ge("genBtn").disabled=true;
   hideAlerts();ge("dbgBox").classList.add("hidden");
-  if(tab==="paste"){setStep(2,"active");}else{setStep(2,"");}
+  if(tab==="paste"||tab==="appid"){setStep(2,"active");}else{setStep(2,"");}
 }
 
 // ── Paste/Type input ──
@@ -461,8 +481,76 @@ function validateRecords(){
   }
 }
 
-function openModal(){if(!isSynced||!records.length)return;hideAlerts();ge("modal").classList.add("show");}
+function openModal(){
+  if(!isSynced||!records.length)return;
+  hideAlerts();
+  if(activeTab==="appid"){
+    var today=new Date();
+    var dd=String(today.getDate()).padStart(2,"0");
+    var mm=String(today.getMonth()+1).padStart(2,"0");
+    ge("closingDateInput").value=today.getFullYear()+"-"+mm+"-"+dd;
+    ge("datePicker").classList.add("show");
+  }else{
+    ge("modal").classList.add("show");
+  }
+}
+function closeDatePicker(){ge("datePicker").classList.remove("show");}
+function confirmDate(){
+  var dateVal=ge("closingDateInput").value;
+  if(!dateVal){showErr("Please select a closing date.");return;}
+  var d=new Date(dateVal+"T00:00:00");
+  var months=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  var fmt=String(d.getDate()).padStart(2,"0")+"-"+months[d.getMonth()]+"-"+String(d.getFullYear()).slice(2);
+  for(var i=0;i<records.length;i++)records[i].dateClosing=fmt;
+  closeDatePicker();
+  ge("modal").classList.add("show");
+}
 function closeModal(){ge("modal").classList.remove("show");}
+
+// ── App ID Only tab input ──
+function onAppIdInput(){
+  var raw=ge("appIdInput").value;
+  var lines=raw.split(/\r?\n/);
+  records=[];
+  for(var i=0;i<lines.length;i++){
+    var line=lines[i].trim();
+    if(!line)continue;
+    var aid=line.split(/\s+/)[0];
+    if(["app id","appid","application id"].indexOf(aid.toLowerCase())>=0)continue;
+    var n=parseFloat(aid.replace(/,/g,""));
+    if(!isNaN(n))records.push({appId:Math.round(n),dateClosing:""});
+  }
+  if(!records.length){
+    ge("fileInfo").classList.remove("show");ge("genBtn").disabled=true;
+    if(raw.trim())showErr("No valid App IDs found. Check format.");
+    else hideAlerts();
+    return;
+  }
+  hideAlerts();
+  ge("fName").textContent="App IDs pasted — "+records.length+" row"+(records.length>1?"s":"");
+  ge("fSize").textContent="Date will be selected on Generate";
+  ge("fileInfo").classList.add("show");
+  ge("matchBadge").style.display="none";
+  ge("genBtn").disabled=true;
+  setStep(2,"done");setStep(3,"active");
+  validateRecords();
+}
+
+// ── Refresh — clears all state for a fresh start ──
+function refreshAll(){
+  records=[];selFile=null;
+  ge("fileInfo").classList.remove("show");
+  ge("genBtn").disabled=true;
+  if(ge("pasteInput"))ge("pasteInput").value="";
+  if(ge("appIdInput"))ge("appIdInput").value="";
+  if(ge("fileInput"))ge("fileInput").value="";
+  ge("fName").textContent="";
+  ge("fSize").textContent="";
+  ge("matchBadge").style.display="none";
+  hideAlerts();
+  ge("dbgBox").classList.add("hidden");
+  setStep(2,"");setStep(3,"");setStep(4,"");
+}
 
 async function generate(calcType){
   closeModal();hideAlerts();
