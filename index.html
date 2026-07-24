@@ -581,11 +581,18 @@ async function generate(calcType){
     var tgtXml=await zip.file(tgtPath).async("string");
     var ddXml=await zip.file("xl/worksheets/sheet3.xml").async("string");
 
-    // Add red fill style to styles.xml (fillId=6 = FFFFC7CE light red, already exists in template)
+    // Add red fill + XF to styles.xml
     var stylesXml=await zip.file("xl/styles.xml").async("string");
-    var redStyleIdx=31;
+    // Step 1: Add proper solid red fill to <fills> section; new fillId = current fills count
+    var fillsCountM=stylesXml.match(/<fills count="(\d+)"/);
+    var newFillId=fillsCountM?parseInt(fillsCountM[1]):6;
+    stylesXml=stylesXml.replace(/<fills count="(\d+)"/,function(m,n){return '<fills count="'+(parseInt(n)+1)+'"';});
+    stylesXml=stylesXml.replace('</fills>','<fill><patternFill patternType="solid"><fgColor rgb="FFFFC7CE"/><bgColor indexed="64"/></patternFill></fill></fills>');
+    // Step 2: Add new XF referencing the new red fill; new style index = current cellXfs count
+    var xfsCountM=stylesXml.match(/<cellXfs count="(\d+)"/);
+    var redStyleIdx=xfsCountM?parseInt(xfsCountM[1]):31;
     stylesXml=stylesXml.replace(/<cellXfs count="(\d+)"/,function(m,n){return '<cellXfs count="'+(parseInt(n)+1)+'"';});
-    stylesXml=stylesXml.replace('</cellXfs>','<xf numFmtId="0" fontId="0" fillId="6" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment wrapText="1"/></xf></cellXfs>');
+    stylesXml=stylesXml.replace('</cellXfs>','<xf numFmtId="0" fontId="0" fillId="'+newFillId+'" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment wrapText="1"/></xf></cellXfs>');
     zip.file("xl/styles.xml",stylesXml);
 
     dbg.push({c:"nf",t:"Processing "+records.length+" App IDs for "+calcType});
