@@ -194,7 +194,7 @@ var DISB_URL = "https://docs.google.com/spreadsheets/d/1FvGTH4IOzoDr6PNBKLfWVENB
 var DATA_URL = "https://docs.google.com/spreadsheets/d/1A6G7GZCKHnmxP9mLcDXmHfFhTSXwA-1AqfphBkCzTYA/export?format=csv&gid=491266174";
 var TMPL_URL = "./template/DEMO.xlsx";
 var COL_B=2, COL_JQ=277, COL_JR=278, COL_JW=283, COL_JX=284;
-var D_FEMI=9, D_TPAY=11, D_TCHG=17, D_ASETL=22;
+var D_FEMI=9, D_TPAY=11, D_TCHG=17, D_ASETL=22, D_LAMNT=7;
 var B_NAME=1, B_TRNCH=2, B_LIVE=3, B_NEMI=4, B_AEMI=5;
 var B_NTEN=6, B_DISC=7, B_INTR=8, B_FLDG=9, B_GRP=10, B_LEND=11;
 var disbIdx={}, dataIdx={};
@@ -244,6 +244,19 @@ function escXml(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;
 function patchCell(xml,cellRef,value,sIdx){
   var esc=cellRef.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
   var newC="<c r=\""+cellRef+"\" s=\""+sIdx+"\"><v>"+value+"</v></c>";
+  var pat=new RegExp("<c r=\""+esc+"\">"+"|<c r=\""+esc+"\"[^>]*\/>"
+    +"|<c r=\""+esc+"\"[^>]*>[\\s\\S]*?<\\/c>","g");
+  var result=xml.replace(pat,function(){return newC;});
+  if(result===xml){
+    var rowNum=cellRef.replace(/[A-Z]+/g,"");
+    result=result.replace(new RegExp("(<row r=\""+rowNum+"\"[^>]*>)"),
+      function(m,o){return o+newC;});
+  }
+  return result;
+}
+function patchTextCell(xml,cellRef,value,sIdx){
+  var esc=cellRef.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+  var newC="<c r=\""+cellRef+"\" s=\""+sIdx+"\" t=\"inlineStr\"><is><t>"+escXml(value)+"</t></is></c>";
   var pat=new RegExp("<c r=\""+esc+"\">"+"|<c r=\""+esc+"\"[^>]*\/>"
     +"|<c r=\""+esc+"\"[^>]*>[\\s\\S]*?<\\/c>","g");
   var result=xml.replace(pat,function(){return newC;});
@@ -568,8 +581,15 @@ async function generate(calcType){
     var tgtXml=await zip.file(tgtPath).async("string");
     var ddXml=await zip.file("xl/worksheets/sheet3.xml").async("string");
 
+    // Add red fill style to styles.xml (fillId=6 = FFFFC7CE light red, already exists in template)
+    var stylesXml=await zip.file("xl/styles.xml").async("string");
+    var redStyleIdx=31;
+    stylesXml=stylesXml.replace(/<cellXfs count="(\d+)"/,function(m,n){return '<cellXfs count="'+(parseInt(n)+1)+'"';});
+    stylesXml=stylesXml.replace('</cellXfs>','<xf numFmtId="0" fontId="0" fillId="6" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment wrapText="1"/></xf></cellXfs>');
+    zip.file("xl/styles.xml",stylesXml);
+
     dbg.push({c:"nf",t:"Processing "+records.length+" App IDs for "+calcType});
-    var filled=0,skipped=0;
+    var filled=0,skipped=0,remarkCount=0;
 
     for(var i=0;i<records.length;i++){
       var appId=records[i].appId,dateClosing=records[i].dateClosing;
@@ -590,6 +610,17 @@ async function generate(calcType){
 
       var dr=lookup(disbIdx,appId);
       if(dr){filled++;}else{skipped++;dbg.push({c:"wn",t:"App "+appId+" -- not in DISB Dump"});}
+
+      // Cross-check: DISB Tranche Amount vs DATA Loan Amount (col H = index 7)
+      var tranche=dr?toNum(dr[B_TRNCH]):0;
+      var sr=lookup(dataIdx,appId);
+      var loanAmt=sr?toNum(sr[D_LAMNT]):0;
+      if(tranche>0&&loanAmt>0&&Math.abs(tranche-loanAmt)>0.5){
+        tgtXml=patchTextCell(tgtXml,"A"+exRow,"Loan Amount not match — recheck with GQ lender dashboard",redStyleIdx);
+        remarkCount++;
+        dbg.push({c:"wn",t:"App "+appId+": Tranche="+tranche+" LoanAmt="+loanAmt+" MISMATCH"});
+      }
+
       if(i<5)dbg.push({c:"ok",t:"App "+appId+": JX="+jx+" JW="+jw+" JQ="+(jq?jq.toLocaleDateString("en-IN"):"--")+" Close="+(dc?dc.toLocaleDateString("en-IN"):dateClosing||"--")});
     }
 
@@ -620,7 +651,7 @@ async function generate(calcType){
     a.href=url;document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
 
     setStep(4,"done");
-    showOk("Excel downloaded! "+records.length+" rows, DD: "+ddResult.filled+" filled.");
+    showOk("Excel downloaded! "+records.length+" rows, DD: "+ddResult.filled+" filled."+(remarkCount?" | ⚠️ "+remarkCount+" Loan Amount mismatch — check col A":""));
     if(skipped)showWarn(skipped+" App ID(s) not in DISB Dump -- those rows show #N/A.");
     dbg.push({c:ddResult.filled>0?"ok":"er",t:"DD: "+ddResult.filled+"/"+records.length+" | A1:L"+Math.max(2,ddResult.lastRow)});
     showDbg(dbg);showLoad(false,"","",100);
