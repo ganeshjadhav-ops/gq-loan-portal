@@ -592,7 +592,7 @@ async function generate(calcType){
     var xfsCountM=stylesXml.match(/<cellXfs count="(\d+)"/);
     var redStyleIdx=xfsCountM?parseInt(xfsCountM[1]):31;
     stylesXml=stylesXml.replace(/<cellXfs count="(\d+)"/,function(m,n){return '<cellXfs count="'+(parseInt(n)+1)+'"';});
-    stylesXml=stylesXml.replace('</cellXfs>','<xf numFmtId="0" fontId="0" fillId="'+newFillId+'" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment wrapText="1"/></xf></cellXfs>');
+    stylesXml=stylesXml.replace('</cellXfs>','<xf numFmtId="0" fontId="0" fillId="'+newFillId+'" borderId="1" xfId="0" applyFill="1" applyBorder="1"/></cellXfs>');
     zip.file("xl/styles.xml",stylesXml);
 
     dbg.push({c:"nf",t:"Processing "+records.length+" App IDs for "+calcType});
